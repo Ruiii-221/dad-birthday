@@ -864,7 +864,9 @@
         var master = audioContext.createGain();
         var stopped = false;
         var cycleTimer = 0;
-        master.gain.value = .22;
+        // Keep the master loud enough for phone speakers. The previous
+        // master (.22) and per-note gain (.22) multiplied to only ~5%.
+        master.gain.value = .82;
         master.connect(audioContext.destination);
 
         var melody = [
@@ -886,7 +888,7 @@
             oscillator.type = i % 6 === 5 ? "triangle" : "sine";
             oscillator.frequency.setValueAtTime(frequency, cursor);
             noteGain.gain.setValueAtTime(.0001, cursor);
-            noteGain.gain.exponentialRampToValueAtTime(.22, cursor + .035);
+            noteGain.gain.exponentialRampToValueAtTime(.5, cursor + .035);
             noteGain.gain.exponentialRampToValueAtTime(.0001, cursor + duration * .9);
             oscillator.connect(noteGain);
             noteGain.connect(master);
@@ -900,11 +902,23 @@
         return {
           start: function () {
             stopped = false;
-            audioContext.resume();
-            playCycle();
+            // iOS/WeChat must finish resuming the AudioContext inside the
+            // user's tap gesture before notes are scheduled.
+            if (audioContext.state === "running") {
+              playCycle();
+              return;
+            }
+            audioContext.resume().then(playCycle).catch(function () {
+              // A second tap on the sound control can still recover playback.
+            });
           },
           setMuted: function (nextMuted) {
-            var target = nextMuted ? .0001 : .22;
+            var target = nextMuted ? .0001 : .82;
+            if (!nextMuted && audioContext.state !== "running") {
+              audioContext.resume().then(function () {
+                if (!cycleTimer && !stopped) playCycle();
+              });
+            }
             master.gain.cancelScheduledValues(audioContext.currentTime);
             master.gain.setValueAtTime(Math.max(master.gain.value, .0001), audioContext.currentTime);
             master.gain.exponentialRampToValueAtTime(target, audioContext.currentTime + .15);
